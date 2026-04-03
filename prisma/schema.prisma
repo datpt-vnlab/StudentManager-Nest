@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Admin {
+  id             String   @id @db.Uuid
+  name           String
+  email          String   @unique
+  otp_code       String?
+  otp_expires_at DateTime?
+  created_at     DateTime
+
+  settings       Setting?
+  face_profiles  FaceProfile[]
+}
+
+model Student {
+  id            String  @id
+  password_hash String
+  first_name    String
+  last_name     String
+  email         String  @unique
+  status        String
+  created_at    DateTime
+}
+
+model Setting {
+  id               String  @id @db.Uuid
+  admin_id         String  @unique @db.Uuid
+  face_id_enabled  Boolean?
+  updated_at       DateTime?
+
+  admin Admin @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+}
+
+model FaceProfile {
+  id         String   @id @db.Uuid
+  admin_id   String?  @db.Uuid
+  descriptor Json
+  created_at DateTime
+
+  admin Admin? @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+}
