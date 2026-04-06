@@ -6,6 +6,8 @@ import {
 import * as bcrypt from "bcrypt";
 import { PrismaService } from "../../prisma/prisma.service";
 import { MailService } from "../../shared/mail/mail.service";
+import { AuthTokenService } from "../token/auth-token.service";
+import { JwtUserPayload } from "../types/jwt-user.type";
 import { SendOtpDto } from "./dto/send-otp.dto";
 import { VerifyOtpDto } from "./dto/verify-otp.dto";
 
@@ -17,6 +19,7 @@ export class AdminAuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
+    private readonly authTokenService: AuthTokenService,
   ) {}
 
   private generateOtpCode(length = 6): string {
@@ -120,6 +123,16 @@ export class AdminAuthService {
       },
     });
 
+    const jwtPayload: JwtUserPayload = {
+      sub: admin.id,
+      role: "admin",
+      email: admin.email,
+      rememberMe,
+    };
+
+    const { accessToken, refreshToken } =
+      this.authTokenService.generateTokenPair(jwtPayload);
+
     return {
       success: true,
       message: "OTP verified",
@@ -131,6 +144,10 @@ export class AdminAuthService {
       session: {
         type: "token_or_session",
         rememberMeApplied: rememberMe,
+      },
+      tokens: {
+        accessToken,
+        refreshToken,
       },
       nextPage: "/admin/dashboard",
     };
