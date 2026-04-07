@@ -110,7 +110,7 @@ async function main() {
   const adminId = uuidv4();
 
   await prisma.faceProfile.deleteMany();
-  await prisma.setting.deleteMany();
+  await prisma.adminSetting.deleteMany();
   await prisma.student.deleteMany();
   await prisma.admin.deleteMany();
   await prisma.major.deleteMany();
@@ -140,11 +140,12 @@ async function main() {
     },
   });
 
-  await prisma.setting.create({
+  await prisma.adminSetting.create({
     data: {
       id: uuidv4(),
       admin_id: adminId,
-      face_id_enabled: true,
+      face_id_enabled: false,
+      session_timeout: 30,
       updated_at: new Date(),
     },
   });

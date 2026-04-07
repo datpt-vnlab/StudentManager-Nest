@@ -15,7 +15,7 @@ model Admin {
   otp_expires_at DateTime?
   created_at     DateTime
 
-  settings       Setting?
+  settings       AdminSetting?
   face_profiles  FaceProfile[]
 }
 
@@ -43,10 +43,11 @@ model Major {
   students Student[]
 }
 
-model Setting {
-  id               String  @id @db.Uuid
-  admin_id         String  @unique @db.Uuid
-  face_id_enabled  Boolean?
+model AdminSetting {
+  id               String   @id @db.Uuid
+  admin_id         String   @unique @db.Uuid
+  face_id_enabled  Boolean  @default(false)
+  session_timeout  Int      @default(30)
   updated_at       DateTime?
 
   admin Admin @relation(fields: [admin_id], references: [id], onDelete: Cascade)
