@@ -25,8 +25,22 @@ model Student {
   first_name    String
   last_name     String
   email         String  @unique
+  major_id      String? @db.Uuid
+  address       String?
+  gender        String?
+  birthday      DateTime?
   status        String
   created_at    DateTime
+
+  major Major? @relation(fields: [major_id], references: [id], onDelete: SetNull)
+}
+
+model Major {
+  id         String   @id @db.Uuid
+  major_name String   @unique
+  created_at DateTime
+
+  students Student[]
 }
 
 model Setting {

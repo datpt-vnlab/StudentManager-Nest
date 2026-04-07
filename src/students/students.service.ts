@@ -17,16 +17,29 @@ export class StudentsService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  async listMajors() {
+    const majors = await this.prisma.$queryRaw<
+      Array<{ id: string; major_name: string; created_at: Date }>
+    >`
+      SELECT id, major_name, created_at
+      FROM "Major"
+      ORDER BY major_name ASC
+    `;
+
+    return {
+      success: true,
+      majors: majors.map((major) => ({
+        id: major.id,
+        name: major.major_name,
+      })),
+    };
+  }
+
   async findAll() {
     const students = await this.prisma.student.findMany({
       orderBy: { created_at: "desc" },
-      select: {
-        id: true,
-        first_name: true,
-        last_name: true,
-        email: true,
-        status: true,
-        created_at: true,
+      include: {
+        major: true,
       },
     });
 
@@ -38,6 +51,7 @@ export class StudentsService {
 
   async create(payload: CreateStudentDto) {
     const data = this.normalizeCreatePayload(payload);
+    await this.ensureMajorExists(data.major_id);
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const studentId = await this.generateNextStudentId();
@@ -51,16 +65,17 @@ export class StudentsService {
             first_name: data.first_name,
             last_name: data.last_name,
             email: data.email,
+            address: data.address,
+            gender: data.gender,
+            birthday: data.birthday,
             status: data.status,
             created_at: new Date(),
+            major: {
+              connect: { id: data.major_id },
+            },
           },
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            email: true,
-            status: true,
-            created_at: true,
+          include: {
+            major: true,
           },
         });
 
@@ -97,19 +112,18 @@ export class StudentsService {
   async update(studentId: string, payload: UpdateStudentDto) {
     await this.ensureStudentExists(studentId);
 
+    if (payload.major_id !== undefined) {
+      await this.ensureMajorExists(payload.major_id);
+    }
+
     const data = await this.buildUpdateData(payload);
 
     try {
       const student = await this.prisma.student.update({
         where: { id: studentId },
         data,
-        select: {
-          id: true,
-          first_name: true,
-          last_name: true,
-          email: true,
-          status: true,
-          created_at: true,
+        include: {
+          major: true,
         },
       });
 
@@ -148,12 +162,16 @@ export class StudentsService {
       first_name: payload.first_name.trim(),
       last_name: payload.last_name.trim(),
       email: payload.email.trim().toLowerCase(),
+      major_id: payload.major_id,
+      address: payload.address.trim(),
+      gender: payload.gender.trim(),
+      birthday: new Date(payload.birthday),
       status: payload.status.trim(),
     };
   }
 
   private async buildUpdateData(payload: UpdateStudentDto) {
-    const data: Prisma.StudentUpdateInput = {};
+    const data: Record<string, unknown> = {};
 
     if (payload.first_name !== undefined) {
       data.first_name = payload.first_name.trim();
@@ -167,6 +185,24 @@ export class StudentsService {
       data.email = payload.email.trim().toLowerCase();
     }
 
+    if (payload.major_id !== undefined) {
+      data.major = {
+        connect: { id: payload.major_id },
+      };
+    }
+
+    if (payload.address !== undefined) {
+      data.address = payload.address.trim();
+    }
+
+    if (payload.gender !== undefined) {
+      data.gender = payload.gender.trim();
+    }
+
+    if (payload.birthday !== undefined) {
+      data.birthday = new Date(payload.birthday);
+    }
+
     if (payload.status !== undefined) {
       data.status = payload.status.trim();
     }
@@ -178,7 +214,7 @@ export class StudentsService {
       );
     }
 
-    return data;
+    return data as Prisma.StudentUpdateInput;
   }
 
   private async generateNextStudentId() {
@@ -216,6 +252,22 @@ export class StudentsService {
       throw new NotFoundException({
         success: false,
         message: "Student not found",
+      });
+    }
+  }
+
+  private async ensureMajorExists(majorId: string) {
+    const major = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id
+      FROM "Major"
+      WHERE id = ${majorId}
+      LIMIT 1
+    `;
+
+    if (major.length === 0) {
+      throw new NotFoundException({
+        success: false,
+        message: "Major not found",
       });
     }
   }

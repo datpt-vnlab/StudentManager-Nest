@@ -23,6 +23,12 @@ import { StudentsService } from "./students.service";
 export class StudentsController {
   constructor(private readonly studentsService: StudentsService) {}
 
+  @Get("major")
+  @HttpCode(HttpStatus.OK)
+  async listMajors() {
+    return this.studentsService.listMajors();
+  }
+
   @Get()
   @HttpCode(HttpStatus.OK)
   async findAll() {
