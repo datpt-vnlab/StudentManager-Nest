@@ -1,0 +1,6 @@
+.git
+node_modules
+dist
+designs
+services/face-worker/__pycache__
+*.log

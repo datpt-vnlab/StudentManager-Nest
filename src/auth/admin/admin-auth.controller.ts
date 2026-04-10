@@ -4,9 +4,10 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Req,
   Res,
 } from "@nestjs/common";
-import { Response } from "express";
+import { Request, Response } from "express";
 import { AdminAuthService } from "./admin-auth.service";
 import { SendOtpDto } from "./dto/send-otp.dto";
 import { VerifyOtpDto } from "./dto/verify-otp.dto";
@@ -84,9 +85,13 @@ export class AdminAuthController {
   @HttpCode(HttpStatus.OK)
   async verifyOtp(
     @Body() body: VerifyOtpDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.adminAuthService.verifyOtp(body);
+    const result = await this.adminAuthService.verifyOtp(
+      body,
+      req.headers["user-agent"],
+    );
 
     this.setAuthCookies(
       res,
@@ -101,6 +106,9 @@ export class AdminAuthController {
       user: result.user,
       session: result.session,
       nextPage: result.nextPage,
+      ...(result.browserRegistration
+        ? { browserRegistration: result.browserRegistration }
+        : {}),
     };
   }
 }

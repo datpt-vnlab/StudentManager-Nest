@@ -3,6 +3,7 @@ import {
   IsEmail,
   IsOptional,
   IsString,
+  MaxLength,
   Length,
 } from "class-validator";
 
@@ -17,4 +18,14 @@ export class VerifyOtpDto {
   @IsOptional()
   @IsBoolean()
   rememberMe?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  browserFingerprint?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  browserLabel?: string;
 }
