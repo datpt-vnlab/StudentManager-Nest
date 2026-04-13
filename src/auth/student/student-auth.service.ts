@@ -89,7 +89,7 @@ export class StudentAuthService {
         accessToken,
         refreshToken,
       },
-      nextPage: "/student/profile",
+      nextPage: "/student/dashboard",
     };
   }
 
