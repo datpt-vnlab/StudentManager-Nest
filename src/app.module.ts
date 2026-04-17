@@ -5,6 +5,10 @@ import { StudentAuthModule } from "./auth/student/student-auth.module";
 import { AdminAuthModule } from "./auth/admin/admin-auth.module";
 import { MailModule } from "./shared/mail/mail.module";
 import { StudentPortalModule } from "./student-portal/student-portal.module";
+import { StudentsModule } from "./students/students.module";
+import { AdminsModule } from "./admins/admins.module";
+import { SettingsModule } from "./settings/settings.module";
+import { FaceIdModule } from "./face-id/face-id.module";
 
 @Module({
   imports: [
@@ -13,7 +17,11 @@ import { StudentPortalModule } from "./student-portal/student-portal.module";
     MailModule,
     StudentAuthModule,
     AdminAuthModule,
+    AdminsModule,
+    SettingsModule,
+    FaceIdModule,
     StudentPortalModule,
+    StudentsModule,
   ],
 })
 export class AppModule {}

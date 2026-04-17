@@ -4,10 +4,28 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import * as bcrypt from "bcrypt";
+import { v4 as uuidv4 } from "uuid";
 import { PrismaService } from "../../prisma/prisma.service";
 import { MailService } from "../../shared/mail/mail.service";
+import { AuthTokenService } from "../token/auth-token.service";
+import { JwtUserPayload } from "../types/jwt-user.type";
 import { SendOtpDto } from "./dto/send-otp.dto";
 import { VerifyOtpDto } from "./dto/verify-otp.dto";
+import {
+  hashBrowserFingerprint,
+  normalizeBrowserFingerprint,
+  normalizeBrowserLabel,
+} from "../../face-id/browser-fingerprint.util";
+
+type AdminLoginUser = {
+  id: string;
+  email: string;
+};
+
+type BrowserRegistrationResult = {
+  fingerprintCaptured: boolean;
+  faceIdEnabledForThisBrowser: boolean;
+};
 
 @Injectable()
 export class AdminAuthService {
@@ -17,7 +35,39 @@ export class AdminAuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
+    private readonly authTokenService: AuthTokenService,
   ) {}
+
+  issueLoginSession(admin: AdminLoginUser, rememberMe: boolean) {
+    const jwtPayload: JwtUserPayload = {
+      sub: admin.id,
+      role: "admin",
+      email: admin.email,
+      rememberMe,
+    };
+
+    const { accessToken, refreshToken } =
+      this.authTokenService.generateTokenPair(jwtPayload);
+
+    return {
+      success: true,
+      message: "Login successful",
+      user: {
+        role: "admin" as const,
+        adminId: admin.id,
+        email: admin.email,
+      },
+      session: {
+        type: "token_or_session" as const,
+        rememberMeApplied: rememberMe,
+      },
+      tokens: {
+        accessToken,
+        refreshToken,
+      },
+      nextPage: "/admin/dashboard",
+    };
+  }
 
   private generateOtpCode(length = 6): string {
     const min = 10 ** (length - 1);
@@ -59,7 +109,7 @@ export class AdminAuthService {
     };
   }
 
-  async verifyOtp(payload: VerifyOtpDto) {
+  async verifyOtp(payload: VerifyOtpDto, userAgent?: string | string[]) {
     const email = payload.email.trim().toLowerCase();
     const rememberMe = Boolean(payload.rememberMe);
 
@@ -120,19 +170,88 @@ export class AdminAuthService {
       },
     });
 
+    const browserRegistration = await this.registerOtpVerifiedBrowser(
+      admin.id,
+      payload.browserFingerprint,
+      payload.browserLabel,
+      userAgent,
+    );
+
     return {
-      success: true,
+      ...(this.issueLoginSession(admin, rememberMe)),
       message: "OTP verified",
-      user: {
-        role: "admin",
-        adminId: admin.id,
-        email: admin.email,
-      },
-      session: {
-        type: "token_or_session",
-        rememberMeApplied: rememberMe,
-      },
-      nextPage: "/admin/dashboard",
+      ...(browserRegistration ? { browserRegistration } : {}),
     };
+  }
+
+  private async registerOtpVerifiedBrowser(
+    adminId: string,
+    browserFingerprint?: string,
+    browserLabel?: string,
+    userAgent?: string | string[],
+  ): Promise<BrowserRegistrationResult | undefined> {
+    const normalizedFingerprint = normalizeBrowserFingerprint(browserFingerprint);
+    if (!normalizedFingerprint) {
+      return undefined;
+    }
+
+    const fingerprintHash = hashBrowserFingerprint(normalizedFingerprint);
+    const normalizedBrowserLabel = normalizeBrowserLabel(browserLabel);
+    const normalizedUserAgent = this.normalizeUserAgent(userAgent);
+
+    const rows = await this.prisma.$queryRawUnsafe<
+      { face_id_enabled: boolean }[]
+    >(
+      `
+        INSERT INTO "admin_face_id_browsers" (
+          "id",
+          "admin_id",
+          "fingerprint_hash",
+          "browser_label",
+          "user_agent",
+          "face_id_enabled",
+          "first_otp_verified_at",
+          "last_otp_verified_at",
+          "created_at",
+          "updated_at"
+        )
+        VALUES ($1, $2, $3, $4, $5, FALSE, NOW(), NOW(), NOW(), NOW())
+        ON CONFLICT ("admin_id", "fingerprint_hash")
+        DO UPDATE SET
+          "browser_label" = COALESCE(
+            EXCLUDED."browser_label",
+            "admin_face_id_browsers"."browser_label"
+          ),
+          "user_agent" = COALESCE(
+            EXCLUDED."user_agent",
+            "admin_face_id_browsers"."user_agent"
+          ),
+          "last_otp_verified_at" = NOW(),
+          "updated_at" = NOW()
+        RETURNING "face_id_enabled"
+      `,
+      uuidv4(),
+      adminId,
+      fingerprintHash,
+      normalizedBrowserLabel,
+      normalizedUserAgent,
+    );
+
+    return {
+      fingerprintCaptured: true,
+      faceIdEnabledForThisBrowser: rows[0]?.face_id_enabled ?? false,
+    };
+  }
+
+  private normalizeUserAgent(userAgent?: string | string[]) {
+    if (Array.isArray(userAgent)) {
+      return userAgent[0] ?? null;
+    }
+
+    if (typeof userAgent === "string" && userAgent.trim()) {
+      return userAgent.trim();
+    }
+
+    return null;
   }
 }

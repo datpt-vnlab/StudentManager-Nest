@@ -2,6 +2,8 @@ import { Controller, Get } from "@nestjs/common";
 import * as bcrypt from "bcrypt";
 import { PrismaService } from "../prisma/prisma.service";
 
+const testStudentIds = ["STU20260001", "STU20260002"];
+
 @Controller("health")
 export class HealthController {
   constructor(private readonly prisma: PrismaService) {}
@@ -30,7 +32,7 @@ export class HealthController {
     const result = await this.prisma.student.updateMany({
       where: {
         id: {
-          in: ["SV001", "SV002"],
+          in: testStudentIds,
         },
       },
       data: {
@@ -42,7 +44,7 @@ export class HealthController {
       ok: true,
       message: 'Reset password for test students to "123456".',
       updatedCount: result.count,
-      studentIds: ["SV001", "SV002"],
+      studentIds: testStudentIds,
     };
   }
 }

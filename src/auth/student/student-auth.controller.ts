@@ -10,7 +10,7 @@ import { Response } from "express";
 import { StudentAuthService } from "./student-auth.service";
 import { StudentLoginDto } from "./dto/student-login.dto";
 
-@Controller("student/auth")
+@Controller("auth/student")
 export class StudentAuthController {
   constructor(private readonly studentAuthService: StudentAuthService) {}
 

@@ -15,20 +15,19 @@ export class MailService {
   private readonly from: string;
 
   constructor() {
-    const host = process.env.SMTP_HOST;
-    const port = Number(process.env.SMTP_PORT ?? 587);
-    const user = process.env.SMTP_USER;
-    const pass = process.env.SMTP_PASS;
-    const secure =
-      process.env.SMTP_SECURE === "true" || port === 465;
+    const host = process.env.MAIL_HOST;
+    const port = Number(process.env.MAIL_PORT ?? 587);
+    const user = process.env.MAIL_USER;
+    const pass = process.env.MAIL_PASS;
+    const secure = process.env.MAIL_SECURE === "true" || port === 465;
 
     if (!host || !user || !pass) {
       throw new InternalServerErrorException(
-        "SMTP configuration is missing. Please set SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASS.",
+        "Mail configuration is missing. Please set MAIL_HOST, MAIL_PORT, MAIL_USER, and MAIL_PASS.",
       );
     }
 
-    this.from = process.env.SMTP_FROM ?? user;
+    this.from = process.env.MAIL_FROM ?? user;
 
     this.transporter = nodemailer.createTransport({
       host,
@@ -44,11 +43,11 @@ export class MailService {
   async verifyConnection(): Promise<void> {
     try {
       await this.transporter.verify();
-      this.logger.log("SMTP connection verified successfully.");
+      this.logger.log("Mail connection verified successfully.");
     } catch (error) {
-      this.logger.error("Failed to verify SMTP connection.", error);
+      this.logger.error("Failed to verify mail connection.", error);
       throw new InternalServerErrorException(
-        "SMTP connection failed. Please check SMTP settings.",
+        "Mail connection failed. Please check mail settings.",
       );
     }
   }

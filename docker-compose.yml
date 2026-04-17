@@ -1,0 +1,23 @@
+services:
+  face-worker:
+    build:
+      context: ./services/face-worker
+    ports:
+      - "8000:8000"
+
+  backend:
+    build:
+      context: .
+    depends_on:
+      - face-worker
+    env_file:
+      - .env
+    environment:
+      # Overrides for values that must differ inside the container network.
+      DATABASE_URL: postgresql://postgres:123456@student_db:5432/student_manager?schema=public
+      FRONTEND_ORIGIN: http://localhost:3000
+      FACE_WORKER_URL: http://face-worker:8000
+      COOKIE_SECURE: "false"
+      COOKIE_SAME_SITE: lax
+    ports:
+      - "3001:3001"
