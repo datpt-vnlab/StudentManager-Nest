@@ -4,3 +4,9 @@ dist
 designs
 services/face-worker/__pycache__
 *.log
+# Exclude Windows-built native Yarn PnP artifacts so they are rebuilt
+# fresh for Linux inside the image. Otherwise bcrypt / argon2 / etc.
+# crash the container with "invalid ELF header".
+.yarn/unplugged
+.yarn/install-state.gz
+.yarn/build-state.yml

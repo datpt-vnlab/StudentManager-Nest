@@ -92,6 +92,131 @@ export class FaceIdWorkerClient {
     }
   }
 
+  // ---------------- Liveness (adaptive) ----------------
+  // Thin pass-throughs to the worker's /face-login/* endpoints. The frontend
+  // never talks directly to the worker (it's on the internal docker network).
+
+  async issueNonce(): Promise<{ nonce: string; ttlSec: number }> {
+    return this.jsonRequest("/face-login/nonce", { method: "POST" });
+  }
+
+  async silentAttempt(
+    nonce: string,
+    frames: UploadedImageFile[],
+    full: UploadedImageFile,
+  ) {
+    const formData = new FormData();
+    formData.append("nonce", nonce);
+    for (const f of frames) {
+      formData.append(
+        "frames",
+        new Blob([new Uint8Array(f.buffer)], { type: f.mimetype }),
+        f.originalname || "frame.jpg",
+      );
+    }
+    formData.append(
+      "full",
+      new Blob([new Uint8Array(full.buffer)], { type: full.mimetype }),
+      full.originalname || "full.jpg",
+    );
+    return this.multipartRequest("/face-login/silent", formData);
+  }
+
+  async challengeAttempt(
+    challengeNonce: string,
+    frames: UploadedImageFile[],
+    full: UploadedImageFile,
+  ) {
+    const formData = new FormData();
+    formData.append("challengeNonce", challengeNonce);
+    for (const f of frames) {
+      formData.append(
+        "frames",
+        new Blob([new Uint8Array(f.buffer)], { type: f.mimetype }),
+        f.originalname || "frame.jpg",
+      );
+    }
+    formData.append(
+      "full",
+      new Blob([new Uint8Array(full.buffer)], { type: full.mimetype }),
+      full.originalname || "full.jpg",
+    );
+    return this.multipartRequest("/face-login/challenge", formData);
+  }
+
+  private async jsonRequest(path: string, init: RequestInit) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await fetch(`${this.workerUrl}${path}`, {
+        ...init,
+        signal: controller.signal,
+      });
+      const payload = (await response.json().catch(() => null)) as any;
+      if (!response.ok) this.throwWorkerError(payload);
+      return payload;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new GatewayTimeoutException({
+          success: false,
+          message: "Face worker timeout",
+          errorCode: "WORKER_TIMEOUT",
+        });
+      }
+      if (
+        error instanceof GatewayTimeoutException ||
+        error instanceof BadRequestException ||
+        error instanceof BadGatewayException
+      ) {
+        throw error;
+      }
+      throw new BadGatewayException({
+        success: false,
+        message: "Unable to reach face worker",
+        errorCode: "WORKER_INTERNAL_ERROR",
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async multipartRequest(path: string, formData: FormData) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await fetch(`${this.workerUrl}${path}`, {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+      const payload = (await response.json().catch(() => null)) as any;
+      if (!response.ok) this.throwWorkerError(payload);
+      return payload;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new GatewayTimeoutException({
+          success: false,
+          message: "Face worker timeout",
+          errorCode: "WORKER_TIMEOUT",
+        });
+      }
+      if (
+        error instanceof GatewayTimeoutException ||
+        error instanceof BadRequestException ||
+        error instanceof BadGatewayException
+      ) {
+        throw error;
+      }
+      throw new BadGatewayException({
+        success: false,
+        message: "Unable to reach face worker",
+        errorCode: "WORKER_INTERNAL_ERROR",
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   private throwWorkerError(
     payload:
       | WorkerSuccessResponse

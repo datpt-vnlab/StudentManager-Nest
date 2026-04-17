@@ -12,6 +12,8 @@ from deepface import DeepFace
 import cv2
 import numpy as np
 
+from liveness import router as liveness_router
+
 MODEL_NAME = "Facenet"
 DETECTOR_BACKEND = "yunet"  # fast + accurate; was "retinaface"
 EXPECTED_EMBEDDING_DIM = 128  # Facenet => 128; Facenet512 => 512
@@ -20,6 +22,11 @@ HEARTBEAT_INTERVAL_SEC = 60
 # Downscale input so we don't run detection on 12MP phone photos.
 # Longest edge is clamped to this value; smaller images are left untouched.
 MAX_INPUT_EDGE_PX = 800
+
+# Anti-spoofing (liveness). DeepFace ships MiniFASNet under the hood when
+# anti_spoofing=True is passed. We run it as a pre-check on the extracted
+# face crop before computing the embedding.
+ANTI_SPOOF_ENABLED_DEFAULT = True
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,6 +69,19 @@ def _warm_up_models() -> None:
             enforce_detection=False,
             align=True,
         )
+        # Warm up the anti-spoof (MiniFASNet) graph too so the first real
+        # liveness check doesn't pay the init cost.
+        try:
+            DeepFace.extract_faces(
+                img_path=dummy_image,
+                detector_backend=DETECTOR_BACKEND,
+                enforce_detection=False,
+                align=False,
+                anti_spoofing=True,
+            )
+            logger.info("Anti-spoof model warmed up")
+        except Exception as exc:
+            logger.warning("Anti-spoof warm-up skipped: %s", exc)
         # Verify embedding dimension matches expectation.
         dim = len(reps[0].get("embedding", [])) if reps else 0
         if dim != EXPECTED_EMBEDDING_DIM:
@@ -122,6 +142,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.state.model_ready = False
+app.include_router(liveness_router)
 
 
 def _normalize_embedding(embedding: list[float]) -> list[float]:
@@ -180,14 +201,26 @@ def health():
         "modelReady": bool(getattr(app.state, "model_ready", False)),
         "modelName": MODEL_NAME,
         "embeddingDim": getattr(app.state, "embedding_dim", EXPECTED_EMBEDDING_DIM),
+        "antiSpoofEnabled": ANTI_SPOOF_ENABLED_DEFAULT,
     }
 
 
 @app.post("/extract-embedding")
-async def extract_embedding(request: Request, image: UploadFile = File(...)):
+async def extract_embedding(
+    request: Request,
+    image: UploadFile = File(...),
+):
     global _in_flight
     req_id = next(_request_counter)
     ip = _client_ip(request)
+
+    # Allow caller to disable anti-spoof per-request (e.g. enroll from trusted
+    # admin UI where liveness is already guaranteed). Query param ?antiSpoof=0.
+    q = request.query_params.get("antiSpoof")
+    if q is None:
+        anti_spoof = ANTI_SPOOF_ENABLED_DEFAULT
+    else:
+        anti_spoof = q.lower() not in ("0", "false", "no", "off")
 
     with _in_flight_lock:
         _in_flight += 1
@@ -242,6 +275,95 @@ async def extract_embedding(request: Request, image: UploadFile = File(...)):
             )
 
         try:
+            # Liveness / anti-spoof pre-check. Uses DeepFace's MiniFASNet.
+            # We run extract_faces(anti_spoofing=True) which annotates each
+            # face dict with `is_real` (bool) and `antispoof_score` (float).
+            if anti_spoof:
+                spoof_started = time.perf_counter()
+                try:
+                    af_faces = DeepFace.extract_faces(
+                        img_path=decoded_image,
+                        detector_backend=DETECTOR_BACKEND,
+                        enforce_detection=True,
+                        align=False,
+                        anti_spoofing=True,
+                    )
+                except ValueError:
+                    logger.warning(
+                        "[req #%d] No face for anti-spoof from ip=%s", req_id, ip
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "errorCode": "NO_FACE_DETECTED",
+                            "message": "No face detected",
+                        },
+                    )
+
+                if len(af_faces) != 1:
+                    # Sometimes yunet flags low-confidence secondary detections
+                    # (shoulder, background) as faces. Keep only high-confidence
+                    # detections and those at least ~60% the size of the largest.
+                    def _score(f):
+                        return float(f.get("confidence", 0.0))
+                    def _area(f):
+                        fa = f.get("facial_area", {}) or {}
+                        return float(fa.get("w", 0)) * float(fa.get("h", 0))
+                    if af_faces:
+                        max_area = max((_area(f) for f in af_faces), default=0.0)
+                        filtered = [
+                            f for f in af_faces
+                            if _score(f) >= 0.6 and _area(f) >= max_area * 0.6
+                        ]
+                    else:
+                        filtered = []
+                    if len(filtered) == 1:
+                        af_faces = filtered
+                    else:
+                        error_code = (
+                            "MULTIPLE_FACES_DETECTED"
+                            if len(af_faces) > 1
+                            else "NO_FACE_DETECTED"
+                        )
+                        message = (
+                            "Multiple faces detected"
+                            if len(af_faces) > 1
+                            else "No face detected"
+                        )
+                        logger.warning(
+                            "[req #%d] %s (anti-spoof stage) ip=%s faces=%d",
+                            req_id,
+                            error_code,
+                            ip,
+                            len(af_faces),
+                        )
+                        raise HTTPException(
+                            status_code=400,
+                            detail={"errorCode": error_code, "message": message},
+                        )
+
+                face_info = af_faces[0]
+                is_real = bool(face_info.get("is_real", False))
+                spoof_score = float(face_info.get("antispoof_score", 0.0))
+                spoof_elapsed = time.perf_counter() - spoof_started
+                logger.info(
+                    "[req #%d] Liveness: is_real=%s score=%.3f elapsed=%.3fs ip=%s",
+                    req_id,
+                    is_real,
+                    spoof_score,
+                    spoof_elapsed,
+                    ip,
+                )
+                if not is_real:
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "errorCode": "SPOOF_DETECTED",
+                            "message": "Liveness check failed",
+                            "antispoofScore": round(spoof_score, 4),
+                        },
+                    )
+
             # Single pass: represent() runs detection + alignment + embedding
             # internally. Avoids the double-detect we were doing before.
             embeddings = DeepFace.represent(
